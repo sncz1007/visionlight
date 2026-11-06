@@ -1,3 +1,5 @@
 packages:
   - "apps/*"
   - "packages/*"
+  # La app de Shopify (configuración + Web Pixel) la compila Shopify CLI por separado.
+  - "!apps/shopify-app"

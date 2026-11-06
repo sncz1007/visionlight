@@ -1,0 +1,24 @@
+# Configuración de la app de Shopify. Reemplaza los valores <...> con los de tu app
+# (Shopify Dev → Apps → tu app → Settings) y con la URL pública de la API.
+client_id = "<SHOPIFY_API_KEY>"
+name = "VISIONLIGHT"
+application_url = "<APP_URL>"
+embedded = false
+
+[access_scopes]
+scopes = "read_products,read_orders,read_customers,write_pixels,read_customer_events"
+
+[auth]
+redirect_urls = ["<APP_URL>/shopify/callback"]
+
+[webhooks]
+api_version = "2026-10"
+
+  # Webhooks obligatorios de privacidad (GDPR/CCPA). Los de carritos y pedidos
+  # los registra la API automáticamente al conectar cada tienda.
+  [[webhooks.subscriptions]]
+  compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
+  uri = "<APP_URL>/webhooks/shopify"
+
+[build]
+include_config_on_deploy = true
