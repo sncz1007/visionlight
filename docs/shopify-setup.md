@@ -30,7 +30,7 @@ SHOPIFY_API_SECRET=<Client secret>
 ENCRYPTION_KEY=<64 caracteres hex, ver .env.example>
 ```
 
-En `apps/shopify-app/shopify.app.toml`, reemplaza `<SHOPIFY_API_KEY>` y `<APP_URL>`.
+En `apps/shopify-app/shopify.app.toml`, reemplaza `<APP_URL>` (el `client_id` ya está puesto).
 
 ## 4. Subir la configuración y el Web Pixel a Shopify
 

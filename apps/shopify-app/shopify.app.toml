@@ -1,6 +1,6 @@
 # Configuración de la app de Shopify. Reemplaza los valores <...> con los de tu app
 # (Shopify Dev → Apps → tu app → Settings) y con la URL pública de la API.
-client_id = "<SHOPIFY_API_KEY>"
+client_id = "a0746cff9bd50a08292d5c066125ed63"
 name = "VISIONLIGHT"
 application_url = "<APP_URL>"
 embedded = false
