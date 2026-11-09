@@ -6,5 +6,10 @@
     "deploy": "shopify app deploy",
     "info": "shopify app info"
   },
-  "devDependencies": { "@shopify/cli": "latest" }
+  "devDependencies": {
+    "@shopify/cli": "latest"
+  },
+  "workspaces": [
+    "extensions/*"
+  ]
 }
