@@ -3,3 +3,12 @@ packages:
   - "packages/*"
   # La app de Shopify (configuración + Web Pixel) la compila Shopify CLI por separado.
   - "!apps/shopify-app"
+
+# Paquetes a los que se permite ejecutar scripts de instalación (Prisma, esbuild...).
+onlyBuiltDependencies:
+  - "@prisma/client"
+  - "@prisma/engines"
+  - prisma
+  - esbuild
+  - sharp
+  - msgpackr-extract
