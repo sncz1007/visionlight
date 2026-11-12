@@ -1,7 +1,7 @@
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHmac, randomBytes } from "node:crypto";
 import { config } from "./config.js";
 
-// Cifrado AES-256-GCM para secretos guardados en la base (tokens de Shopify).
+// Cifrado AES-256-GCM para secretos y datos personales guardados en la base.
 // Formato: v1:<iv>:<tag>:<datos>, todo en base64url.
 const key = () => Buffer.from(config.encryptionKey, "hex");
 
@@ -18,4 +18,33 @@ export function decrypt(payload: string): string {
   const decipher = createDecipheriv("aes-256-gcm", key(), Buffer.from(iv, "base64url"));
   decipher.setAuthTag(Buffer.from(tag, "base64url"));
   return Buffer.concat([decipher.update(Buffer.from(data, "base64url")), decipher.final()]).toString("utf8");
+}
+
+// ── Datos personales de clientes (correo, teléfono) ──
+// Se guardan cifrados. Para poder buscarlos (p. ej. al borrar un cliente)
+// guardamos además un "índice ciego": HMAC del valor normalizado, con una
+// clave derivada distinta de la de cifrado.
+const indexKey = () => createHmac("sha256", key()).update("visionlight:blind-index:v1").digest();
+
+export function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+export function blindIndex(value: string): string {
+  return createHmac("sha256", indexKey()).update(value).digest("base64url");
+}
+
+export function encryptOptional(value: string | null | undefined): string | null {
+  return value ? encrypt(value) : null;
+}
+
+export function decryptOptional(value: string | null | undefined): string | null {
+  return value ? decrypt(value) : null;
+}
+
+/** Cifra un correo y calcula su índice ciego, listos para guardar. */
+export function protectEmail(email: string | null | undefined): { emailEnc: string | null; emailHash: string | null } {
+  if (!email || !email.trim()) return { emailEnc: null, emailHash: null };
+  const normalized = normalizeEmail(email);
+  return { emailEnc: encrypt(normalized), emailHash: blindIndex(normalized) };
 }

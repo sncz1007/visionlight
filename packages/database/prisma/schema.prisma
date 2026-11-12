@@ -140,7 +140,9 @@ model Visitor {
   // clientId que asigna Shopify al navegador del visitante.
   clientId   String
   customerId String?
-  email      String?
+  // Datos personales cifrados (AES-256-GCM) + índice ciego (HMAC) para buscar.
+  emailEnc   String?
+  emailHash  String?
   firstSeen  DateTime @default(now())
   lastSeen   DateTime @default(now())
   store      Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
@@ -173,8 +175,10 @@ model Cart {
   id            String     @id @default(cuid())
   storeId       String
   checkoutToken String
-  email         String?
-  phone         String?
+  // Datos personales cifrados (AES-256-GCM) + índice ciego (HMAC) para buscar.
+  emailEnc      String?
+  emailHash     String?
+  phoneEnc      String?
   customerId    String?
   totalPrice    Decimal    @db.Decimal(12, 2)
   currency      String
@@ -189,7 +193,7 @@ model Cart {
 
   @@unique([storeId, checkoutToken])
   @@index([storeId, status, updatedAt])
-  @@index([storeId, email])
+  @@index([storeId, emailHash])
 }
 
 model Order {
@@ -197,7 +201,8 @@ model Order {
   storeId        String
   shopifyOrderId String
   checkoutToken  String?
-  email          String?
+  emailEnc       String?
+  emailHash      String?
   customerId     String?
   totalPrice     Decimal  @db.Decimal(12, 2)
   currency       String
@@ -207,7 +212,7 @@ model Order {
 
   @@unique([storeId, shopifyOrderId])
   @@index([storeId, orderedAt])
-  @@index([storeId, email])
+  @@index([storeId, emailHash])
 }
 
 // Registro de webhooks recibidos: evita procesar dos veces el mismo aviso.

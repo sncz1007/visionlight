@@ -7,9 +7,9 @@ process.env.SHOPIFY_API_KEY = "test-key";
 process.env.SHOPIFY_API_SECRET = SECRET;
 process.env.APP_URL = "https://api.visionlight.test";
 
-const { prisma } = await import("@visionlight/database");
+const { prisma, applyRetention } = await import("@visionlight/database");
 const { buildApp } = await import("../src/app.js");
-const { decrypt } = await import("../src/lib/crypto.js");
+const { decrypt, blindIndex } = await import("../src/lib/crypto.js");
 const { normalizeShopDomain, verifyQueryHmac } = await import("../src/shopify/oauth.js");
 
 let app: FastifyInstance;
@@ -27,7 +27,7 @@ function signBody(body: string) {
   return createHmac("sha256", SECRET).update(body).digest("base64");
 }
 async function signup(email: string, org: string) {
-  const res = await app.inject({ method: "POST", url: "/auth/signup", payload: { name: "T", email, password: "una-clave-segura", organizationName: org } });
+  const res = await app.inject({ method: "POST", url: "/auth/signup", payload: { name: "T", email, password: "una-clave-segura", organizationName: org, acceptTerms: true } });
   return { cookie: cookieFrom(res), orgId: res.json().organization.id as string };
 }
 async function webhook(topic: string, payload: object, id = Math.random().toString(36)) {
@@ -124,10 +124,16 @@ describe("webhooks", () => {
   it("guarda el carrito y lo cierra cuando llega el pedido", async () => {
     const { cookie, orgId } = await signup("a@a.com", "Empresa A");
     await connectStore(cookie, orgId);
-    const checkout = { token: "tok1", email: "cliente@x.com", total_price: "49.90", currency: "USD", buyer_accepts_marketing: true, line_items: [{ product_id: 1, variant_id: 2, title: "Camiseta", quantity: 1, price: "49.90" }], abandoned_checkout_url: "https://x/recover" };
+    const checkout = { token: "tok1", email: "Cliente@X.com", phone: "+573001112233", total_price: "49.90", currency: "USD", buyer_accepts_marketing: true, line_items: [{ product_id: 1, variant_id: 2, title: "Camiseta", quantity: 1, price: "49.90" }], abandoned_checkout_url: "https://x/recover" };
     expect((await webhook("checkouts/create", checkout)).statusCode).toBe(200);
     let cart = await prisma.cart.findFirstOrThrow();
-    expect(cart).toMatchObject({ status: "OPEN", email: "cliente@x.com", marketingConsent: true });
+    expect(cart).toMatchObject({ status: "OPEN", marketingConsent: true });
+    // Correo y teléfono se guardan cifrados, nunca en texto plano.
+    expect(cart.emailEnc).not.toContain("cliente");
+    expect(decrypt(cart.emailEnc!)).toBe("cliente@x.com");
+    expect(cart.phoneEnc).not.toContain("3001112233");
+    expect(decrypt(cart.phoneEnc!)).toBe("+573001112233");
+    expect(cart.emailHash).toBe(blindIndex("cliente@x.com"));
     expect(cart.totalPrice.toString()).toBe("49.9");
 
     await webhook("orders/create", { id: 99, checkout_token: "tok1", email: "cliente@x.com", total_price: "49.90", currency: "USD", created_at: new Date().toISOString() });
@@ -152,13 +158,27 @@ describe("webhooks", () => {
     const { cookie, orgId } = await signup("a@a.com", "Empresa A");
     await connectStore(cookie, orgId);
     await webhook("checkouts/create", { token: "t", email: "borrar@x.com", total_price: "5", currency: "USD", line_items: [] });
-    await webhook("customers/redact", { customer: { email: "borrar@x.com" } });
+    await webhook("customers/redact", { customer: { email: "BORRAR@x.com" } });
     expect(await prisma.cart.count()).toBe(0);
     await webhook("app/uninstalled", {});
     const store = await prisma.store.findUniqueOrThrow({ where: { shopDomain: SHOP } });
     expect(store).toMatchObject({ status: "UNINSTALLED", accessTokenEnc: null });
     await webhook("shop/redact", {});
     expect(await prisma.store.count()).toBe(0);
+  });
+});
+
+describe("Retención de datos", () => {
+  it("borra lo que superó su plazo y conserva lo reciente", async () => {
+    const { cookie, orgId } = await signup("a@a.com", "Empresa A");
+    await connectStore(cookie, orgId);
+    await webhook("checkouts/create", { token: "nuevo", total_price: "5", currency: "USD", line_items: [] });
+    await webhook("checkouts/create", { token: "viejo", total_price: "5", currency: "USD", line_items: [] });
+    const old = new Date(Date.now() - 91 * 24 * 60 * 60 * 1000);
+    await prisma.$executeRaw`UPDATE "Cart" SET "updatedAt" = ${old} WHERE "checkoutToken" = 'viejo'`;
+    const result = await applyRetention(prisma);
+    expect(result.carts).toBe(1);
+    expect((await prisma.cart.findMany()).map((c) => c.checkoutToken)).toEqual(["nuevo"]);
   });
 });
 

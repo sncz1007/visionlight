@@ -1,4 +1,5 @@
 import type { PrismaClient, Prisma } from "@visionlight/database";
+import { blindIndex, encryptOptional, normalizeEmail, protectEmail } from "../lib/crypto.js";
 
 type Json = Record<string, any>;
 
@@ -24,8 +25,8 @@ export async function handleCheckout(prisma: PrismaClient, storeId: string, p: J
   if (!token) return;
   const completed = Boolean(p.completed_at);
   const data = {
-    email: p.email ?? p.customer?.email ?? null,
-    phone: p.phone ?? p.customer?.phone ?? null,
+    ...protectEmail(p.email ?? p.customer?.email),
+    phoneEnc: encryptOptional(p.phone ?? p.customer?.phone),
     customerId: p.customer?.id ? String(p.customer.id) : null,
     totalPrice: money(p.total_price),
     currency: p.presentment_currency ?? p.currency ?? "USD",
@@ -52,7 +53,7 @@ export async function handleOrderCreate(prisma: PrismaClient, storeId: string, p
       storeId,
       shopifyOrderId: String(p.id),
       checkoutToken,
-      email: p.email ?? p.customer?.email ?? null,
+      ...protectEmail(p.email ?? p.customer?.email),
       customerId: p.customer?.id ? String(p.customer.id) : null,
       totalPrice: money(p.total_price),
       currency: p.presentment_currency ?? p.currency ?? "USD",
@@ -85,13 +86,13 @@ export async function handleCustomerRedact(prisma: PrismaClient, storeId: string
   const email: string | undefined = p.customer?.email;
   const customerId = p.customer?.id ? String(p.customer.id) : undefined;
   const or: Prisma.CartWhereInput[] = [];
-  if (email) or.push({ email });
+  if (email) or.push({ emailHash: blindIndex(normalizeEmail(email)) });
   if (customerId) or.push({ customerId });
   if (!or.length) return;
   await prisma.$transaction([
     prisma.cart.deleteMany({ where: { storeId, OR: or } }),
-    prisma.order.updateMany({ where: { storeId, OR: or as Prisma.OrderWhereInput[] }, data: { email: null, customerId: null } }),
-    prisma.visitor.updateMany({ where: { storeId, OR: or as Prisma.VisitorWhereInput[] }, data: { email: null, customerId: null } }),
+    prisma.order.updateMany({ where: { storeId, OR: or as Prisma.OrderWhereInput[] }, data: { emailEnc: null, emailHash: null, customerId: null } }),
+    prisma.visitor.updateMany({ where: { storeId, OR: or as Prisma.VisitorWhereInput[] }, data: { emailEnc: null, emailHash: null, customerId: null } }),
   ]);
 }
 

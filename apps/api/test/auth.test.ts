@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { prisma } from "@visionlight/database";
+import { signupSchema } from "@visionlight/shared";
 import { buildApp } from "../src/app.js";
 
 let app: FastifyInstance;
@@ -14,7 +15,7 @@ function cookieFrom(res: { headers: Record<string, unknown> }): string {
 async function signup(email: string, org: string) {
   const res = await app.inject({
     method: "POST", url: "/auth/signup",
-    payload: { name: "Test", email, password: "una-clave-segura", organizationName: org },
+    payload: { name: "Test", email, password: "una-clave-segura", organizationName: org, acceptTerms: true },
   });
   return { res, cookie: cookieFrom(res), body: res.json() };
 }
@@ -32,6 +33,14 @@ describe("auth", () => {
     const me = await app.inject({ method: "GET", url: "/auth/me", headers: { cookie } });
     expect(me.statusCode).toBe(200);
     expect(me.json().organizations[0]).toMatchObject({ name: "Tienda Ana", role: "OWNER" });
+  });
+
+  it("rechaza contraseñas cortas, repetitivas o comunes", async () => {
+    const base = { name: "T", email: "x@x.com", organizationName: "Empresa X", acceptTerms: true };
+    for (const password of ["corta-1", "aaaaaaaaaaaaaa", "mi-password-largo"]) {
+      expect(signupSchema.safeParse({ ...base, password }).success).toBe(false);
+    }
+    expect(signupSchema.safeParse({ ...base, password: "una-clave-segura" }).success).toBe(true);
   });
 
   it("rechaza email duplicado", async () => {
