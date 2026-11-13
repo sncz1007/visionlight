@@ -133,6 +133,15 @@ export async function shopifyRoutes(app: FastifyInstance) {
         switch (topic) {
           case "checkouts/create":
           case "checkouts/update":
+            // Diagnóstico sin datos personales: solo qué campos de contacto trae el aviso.
+            req.log.info({
+              topic,
+              contactFields: {
+                email: Boolean(payload.email), phone: Boolean(payload.phone), customerPhone: Boolean(payload.customer?.phone),
+                shippingPhone: Boolean(payload.shipping_address?.phone), billingPhone: Boolean(payload.billing_address?.phone),
+                shippingKeys: payload.shipping_address ? Object.keys(payload.shipping_address).length : 0,
+              },
+            }, "checkout recibido");
             if (store.status === "ACTIVE") await handleCheckout(app.prisma, store.id, payload);
             break;
           case "orders/create":
