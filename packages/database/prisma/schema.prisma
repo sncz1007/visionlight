@@ -1,5 +1,7 @@
-// Esquema de VISIONLIGHT. Fase 1: empresas, usuarios, roles, sesiones y auditoría.
-// Las tablas de tiendas, eventos, carritos y automatizaciones se añaden en las fases 2 y 3.
+// Esquema de VISIONLIGHT.
+// Fase 1: empresas, usuarios, roles, sesiones y auditoría.
+// Fase 2: tiendas Shopify, visitantes, eventos, carritos y pedidos.
+// Las automatizaciones y campañas se añaden en la fase 3.
 
 generator client {
   provider = "prisma-client-js"
@@ -24,6 +26,7 @@ model Organization {
   updatedAt   DateTime     @updatedAt
   memberships Membership[]
   auditLogs   AuditLog[]
+  stores      Store[]
 }
 
 model User {
@@ -77,4 +80,153 @@ model AuditLog {
   user           User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([organizationId, createdAt])
+}
+
+// ───────────── Fase 2: Shopify ─────────────
+
+enum StoreStatus {
+  ACTIVE
+  UNINSTALLED
+}
+
+enum CartStatus {
+  OPEN
+  ABANDONED
+  RECOVERED
+  COMPLETED
+}
+
+model Store {
+  id             String       @id @default(cuid())
+  organizationId String
+  platform       String       @default("shopify")
+  shopDomain     String       @unique
+  name           String?
+  currency       String?
+  // Token de acceso cifrado con AES-256-GCM. Nunca se guarda en texto plano.
+  accessTokenEnc String?
+  // Shopify exige tokens que vencen (1 h) y se renuevan con un refresh token (90 días).
+  accessTokenExpiresAt  DateTime?
+  refreshTokenEnc       String?
+  refreshTokenExpiresAt DateTime?
+  scopes         String?
+  status         StoreStatus  @default(ACTIVE)
+  // Clave pública que usa el Web Pixel para enviar eventos de esta tienda.
+  pixelKey       String       @unique
+  webPixelId     String?
+  installedAt    DateTime     @default(now())
+  uninstalledAt  DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  visitors       Visitor[]
+  events         Event[]
+  carts          Cart[]
+  orders         Order[]
+
+  @@index([organizationId])
+}
+
+// Estado temporal del flujo OAuth (protege contra CSRF).
+model ShopifyOAuthState {
+  id             String   @id @default(cuid())
+  nonce          String   @unique
+  shopDomain     String
+  organizationId String
+  userId         String
+  expiresAt      DateTime
+  createdAt      DateTime @default(now())
+}
+
+model Visitor {
+  id         String   @id @default(cuid())
+  storeId    String
+  // clientId que asigna Shopify al navegador del visitante.
+  clientId   String
+  customerId String?
+  // Datos personales cifrados (AES-256-GCM) + índice ciego (HMAC) para buscar.
+  emailEnc   String?
+  emailHash  String?
+  firstSeen  DateTime @default(now())
+  lastSeen   DateTime @default(now())
+  store      Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  events     Event[]
+
+  @@unique([storeId, clientId])
+  @@index([storeId, lastSeen])
+}
+
+model Event {
+  id         String   @id @default(cuid())
+  storeId    String
+  visitorId  String?
+  // id del evento según Shopify, para no guardar duplicados.
+  externalId String
+  name       String
+  url        String?
+  data       Json?
+  occurredAt DateTime
+  receivedAt DateTime @default(now())
+  store      Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  visitor    Visitor? @relation(fields: [visitorId], references: [id], onDelete: SetNull)
+
+  @@unique([storeId, externalId])
+  @@index([storeId, occurredAt])
+  @@index([storeId, name, occurredAt])
+}
+
+model Cart {
+  id            String     @id @default(cuid())
+  storeId       String
+  checkoutToken String
+  // Datos personales cifrados (AES-256-GCM) + índice ciego (HMAC) para buscar.
+  emailEnc      String?
+  emailHash     String?
+  phoneEnc      String?
+  nameEnc       String?
+  customerId    String?
+  totalPrice    Decimal    @db.Decimal(12, 2)
+  currency      String
+  lineItems     Json
+  recoveryUrl   String?
+  status        CartStatus @default(OPEN)
+  marketingConsent Boolean @default(false)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  completedAt   DateTime?
+  store         Store      @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, checkoutToken])
+  @@index([storeId, status, updatedAt])
+  @@index([storeId, emailHash])
+}
+
+model Order {
+  id             String   @id @default(cuid())
+  storeId        String
+  shopifyOrderId String
+  checkoutToken  String?
+  emailEnc       String?
+  emailHash      String?
+  customerId     String?
+  totalPrice     Decimal  @db.Decimal(12, 2)
+  currency       String
+  orderedAt      DateTime
+  createdAt      DateTime @default(now())
+  store          Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, shopifyOrderId])
+  @@index([storeId, orderedAt])
+  @@index([storeId, emailHash])
+}
+
+// Registro de webhooks recibidos: evita procesar dos veces el mismo aviso.
+model WebhookReceipt {
+  id         String   @id @default(cuid())
+  webhookId  String   @unique
+  topic      String
+  shopDomain String
+  receivedAt DateTime @default(now())
+
+  @@index([shopDomain, receivedAt])
 }

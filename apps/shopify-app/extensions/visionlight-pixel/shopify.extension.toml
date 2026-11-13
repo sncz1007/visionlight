@@ -1,0 +1,26 @@
+type = "web_pixel_extension"
+name = "visionlight-pixel"
+runtime_context = "strict"
+
+# El pixel solo se ejecuta si el visitante dio permiso de analítica y marketing.
+# No vendemos datos: sale_of_data = "disabled".
+[customer_privacy]
+analytics = true
+marketing = true
+preferences = false
+sale_of_data = "disabled"
+
+[settings]
+type = "object"
+
+[settings.fields.accountID]
+name = "Clave de la tienda"
+description = "Clave pública que VISIONLIGHT asigna a esta tienda"
+type = "single_line_text_field"
+validations = [{ name = "min", value = "10" }]
+
+[settings.fields.ingestUrl]
+name = "URL de recepción"
+description = "Dirección de la API de VISIONLIGHT que recibe los eventos"
+type = "single_line_text_field"
+validations = [{ name = "min", value = "8" }]

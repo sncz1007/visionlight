@@ -20,7 +20,7 @@ export function AuthForm({ mode }: { mode: "signup" | "login" }) {
           { name: "name", label: "Tu nombre", autoComplete: "name" },
           { name: "organizationName", label: "Nombre de tu empresa o tienda", autoComplete: "organization" },
           { name: "email", label: "Email", type: "email", autoComplete: "email" },
-          { name: "password", label: "Contraseña (mínimo 10 caracteres)", type: "password", autoComplete: "new-password" },
+          { name: "password", label: "Contraseña (mínimo 12 caracteres)", type: "password", autoComplete: "new-password" },
         ]
       : [
           { name: "email", label: "Email", type: "email", autoComplete: "email" },
@@ -53,6 +53,15 @@ export function AuthForm({ mode }: { mode: "signup" | "login" }) {
               className="rounded-lg border border-slate-300 bg-white px-3 py-2 font-normal outline-none focus:border-indigo-500" />
           </label>
         ))}
+        {mode === "signup" && (
+          <label className="flex items-start gap-2 text-sm text-slate-600">
+            <input name="acceptTerms" type="checkbox" required className="mt-0.5" />
+            <span>
+              Acepto los <Link className="text-indigo-600" href="/terminos" target="_blank">Términos y el acuerdo de tratamiento de datos</Link> y
+              la <Link className="text-indigo-600" href="/privacidad" target="_blank">Política de privacidad</Link>.
+            </span>
+          </label>
+        )}
         {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
         <button disabled={!ready || loading} className="rounded-lg bg-indigo-600 py-2.5 font-medium text-white hover:bg-indigo-700 disabled:opacity-60">
           {loading ? "Un momento…" : mode === "signup" ? "Crear cuenta" : "Entrar"}

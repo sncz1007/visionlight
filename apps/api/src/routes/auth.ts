@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import bcrypt from "bcryptjs";
-import { loginSchema, signupSchema, slugify } from "@visionlight/shared";
+import { LEGAL_VERSION, loginSchema, signupSchema, slugify } from "@visionlight/shared";
 import { config } from "../lib/config.js";
 import { createSession, hashToken } from "../lib/session.js";
 import { audit } from "../lib/audit.js";
@@ -19,7 +19,8 @@ function setSessionCookie(reply: FastifyReply, token: string, expiresAt: Date) {
 }
 
 export async function authRoutes(app: FastifyInstance) {
-  const strictLimit = { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } };
+  // En las pruebas automáticas se crean muchas cuentas seguidas desde la misma IP.
+  const strictLimit = { config: { rateLimit: { max: process.env.VITEST ? 1000 : 10, timeWindow: "1 minute" } } };
 
   app.post("/auth/signup", strictLimit, async (req, reply) => {
     const parsed = signupSchema.safeParse(req.body);
@@ -44,7 +45,7 @@ export async function authRoutes(app: FastifyInstance) {
 
     const { token, expiresAt } = await createSession(app.prisma, user.id, { ip: req.ip, userAgent: req.headers["user-agent"] });
     setSessionCookie(reply, token, expiresAt);
-    await audit(app.prisma, { action: "user.signup", userId: user.id, organizationId: organization.id, ip: req.ip });
+    await audit(app.prisma, { action: "user.signup", userId: user.id, organizationId: organization.id, ip: req.ip, metadata: { termsAccepted: LEGAL_VERSION } });
 
     return reply.code(201).send({
       user: { id: user.id, email: user.email, name: user.name },

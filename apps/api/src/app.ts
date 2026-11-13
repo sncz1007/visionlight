@@ -8,6 +8,9 @@ import { config } from "./lib/config.js";
 import { authPlugin } from "./plugins/auth.js";
 import { authRoutes } from "./routes/auth.js";
 import { orgRoutes } from "./routes/orgs.js";
+import { shopifyRoutes } from "./routes/shopify.js";
+import { ingestRoutes } from "./routes/ingest.js";
+import { storeRoutes } from "./routes/stores.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -20,7 +23,11 @@ export async function buildApp(opts: { prisma?: PrismaClient; logger?: boolean }
   app.decorate("prisma", opts.prisma ?? defaultPrisma);
 
   await app.register(helmet);
-  await app.register(cors, { origin: config.dashboardUrl, credentials: true });
+  // El Web Pixel envía eventos desde cualquier tienda (sin cookies); el resto solo acepta al panel.
+  await app.register(cors, () => (req: { url?: string }, cb: (err: Error | null, opts: object) => void) =>
+    cb(null, req.url?.startsWith("/ingest/")
+      ? { origin: true, credentials: false, methods: ["POST"] }
+      : { origin: config.dashboardUrl, credentials: true }));
   await app.register(rateLimit, { max: 300, timeWindow: "1 minute" });
   await app.register(cookie);
   await app.register(authPlugin);
@@ -28,6 +35,9 @@ export async function buildApp(opts: { prisma?: PrismaClient; logger?: boolean }
   app.get("/health", async () => ({ ok: true }));
   await app.register(authRoutes);
   await app.register(orgRoutes);
+  await app.register(storeRoutes);
+  await app.register(shopifyRoutes);
+  await app.register(ingestRoutes);
 
   return app;
 }

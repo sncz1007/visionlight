@@ -17,6 +17,10 @@ const worker = new Worker(
       const { count } = await prisma.session.deleteMany({ where: { expiresAt: { lt: new Date() } } });
       return { deletedSessions: count };
     }
+    if (job.name === "retention") {
+      const { prisma, applyRetention } = await import("@visionlight/database");
+      return applyRetention(prisma);
+    }
   },
   { connection },
 );
@@ -26,6 +30,8 @@ worker.on("failed", (job, err) => console.error(`[worker] ${job?.name} falló`, 
 
 // Borra sesiones vencidas cada hora.
 await maintenance.upsertJobScheduler("cleanup-sessions-hourly", { every: 60 * 60 * 1000 }, { name: "cleanup-sessions" });
+// Borra cada día los datos que superaron su plazo de retención.
+await maintenance.upsertJobScheduler("retention-daily", { pattern: "0 3 * * *" }, { name: "retention" });
 console.log("[worker] listo");
 
 async function shutdown() {
