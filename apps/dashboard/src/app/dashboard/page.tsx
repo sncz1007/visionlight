@@ -11,6 +11,12 @@ type Activity = {
   recentEvents: { id: string; name: string; url: string | null; occurredAt: string; shop: string }[];
 };
 
+type CartRow = {
+  id: string; shop: string; status: "OPEN" | "ABANDONED"; email: string | null; phone: string | null;
+  marketingConsent: boolean; totalPrice: string; currency: string; recoveryUrl: string | null; updatedAt: string;
+  lineItems: { title: string; quantity: number; price: string }[];
+};
+
 const EVENT_LABELS: Record<string, string> = {
   page_viewed: "Vio una página",
   product_viewed: "Vio un producto",
@@ -30,6 +36,7 @@ export default function Dashboard() {
   const [members, setMembers] = useState<Member[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
   const [activity, setActivity] = useState<Activity | null>(null);
+  const [carts, setCarts] = useState<CartRow[]>([]);
   const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [connecting, setConnecting] = useState(false);
 
@@ -37,11 +44,13 @@ export default function Dashboard() {
   const canManage = org?.role === "OWNER" || org?.role === "ADMIN";
 
   const load = useCallback(async (orgId: string) => {
-    const [m, s, a] = await Promise.all([
+    const [m, s, a, c] = await Promise.all([
       api<{ members: Member[] }>(`/orgs/${orgId}/members`),
       api<{ stores: Store[] }>(`/orgs/${orgId}/stores`),
       api<Activity>(`/orgs/${orgId}/activity`),
+      api<{ carts: CartRow[] }>(`/orgs/${orgId}/carts`),
     ]);
+    setCarts(c.carts);
     setMembers(m.members);
     setStores(s.stores);
     setActivity(a);
@@ -181,6 +190,50 @@ export default function Dashboard() {
               <p className="mt-2 text-2xl font-semibold">{c.value}</p>
             </div>
           ))}
+        </section>
+
+        <section className="mt-10">
+          <h2 className="mb-3 text-lg font-semibold">Carritos sin comprar</h2>
+          {carts.length ? (
+            <ul className="divide-y divide-slate-200 rounded-xl border border-slate-200 bg-white">
+              {carts.map((c) => (
+                <li key={c.id} className="px-5 py-4 text-sm">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <p className="font-medium">{c.email ?? "Sin correo todavía"}</p>
+                      {c.phone && <p className="text-slate-500">{c.phone}</p>}
+                    </div>
+                    <div className="text-right">
+                      <p className="font-semibold">
+                        {Number(c.totalPrice).toLocaleString("es", { minimumFractionDigits: 2 })} {c.currency}
+                      </p>
+                      <p className="text-slate-500">{new Date(c.updatedAt).toLocaleString("es")}</p>
+                    </div>
+                  </div>
+                  <p className="mt-2 text-slate-600">
+                    {c.lineItems.map((i) => `${i.quantity} × ${i.title}`).join(", ") || "Sin productos"}
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                    <span className={`rounded-full px-2 py-0.5 ${c.marketingConsent ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                      {c.marketingConsent ? "Acepta recibir ofertas" : "No acepta ofertas"}
+                    </span>
+                    <span className="rounded-full bg-amber-50 px-2 py-0.5 text-amber-700">
+                      {c.status === "ABANDONED" ? "Abandonado" : "Abierto"}
+                    </span>
+                    {c.recoveryUrl && (
+                      <a href={c.recoveryUrl} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">
+                        Enlace de recuperación
+                      </a>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="rounded-xl border border-dashed border-slate-300 bg-white px-5 py-6 text-sm text-slate-500">
+              No hay carritos sin comprar por ahora.
+            </p>
+          )}
         </section>
 
         <section className="mt-10">

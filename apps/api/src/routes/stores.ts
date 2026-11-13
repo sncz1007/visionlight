@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
-import { audit } from "../lib/audit.js";
+import { audit, logPersonalDataAccess } from "../lib/audit.js";
+import { decryptOptional } from "../lib/crypto.js";
 
 export async function storeRoutes(app: FastifyInstance) {
   const anyMember = { preHandler: app.requireOrgRole(["OWNER", "ADMIN", "MEMBER"]) };
@@ -37,6 +38,37 @@ export async function storeRoutes(app: FastifyInstance) {
       last7Days: { visitors, productViews, addToCarts, orders, revenue: revenue._sum.totalPrice?.toString() ?? "0" },
       openCarts,
       recentEvents: recent.map((e) => ({ id: e.id, name: e.name, url: e.url, occurredAt: e.occurredAt, shop: e.store.shopDomain })),
+    };
+  });
+
+  // Carritos abiertos o abandonados, con los datos del cliente descifrados.
+  // Cada consulta queda en el registro de accesos a datos personales.
+  app.get("/orgs/:orgId/carts", anyMember, async (req) => {
+    const orgId = req.membership!.organizationId;
+    const carts = await app.prisma.cart.findMany({
+      where: { store: { organizationId: orgId }, status: { in: ["OPEN", "ABANDONED"] } },
+      orderBy: { updatedAt: "desc" },
+      take: 50,
+      include: { store: { select: { shopDomain: true } } },
+    });
+    await logPersonalDataAccess(app.prisma, {
+      organizationId: orgId, userId: req.user!.id, ip: req.ip, resource: "cart",
+      recordIds: carts.filter((c) => c.emailEnc || c.phoneEnc).map((c) => c.id), purpose: "panel: lista de carritos",
+    });
+    return {
+      carts: carts.map((c) => ({
+        id: c.id,
+        shop: c.store.shopDomain,
+        status: c.status,
+        email: decryptOptional(c.emailEnc),
+        phone: decryptOptional(c.phoneEnc),
+        marketingConsent: c.marketingConsent,
+        totalPrice: c.totalPrice.toString(),
+        currency: c.currency,
+        lineItems: c.lineItems,
+        recoveryUrl: c.recoveryUrl,
+        updatedAt: c.updatedAt,
+      })),
     };
   });
 

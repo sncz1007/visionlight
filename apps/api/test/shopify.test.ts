@@ -190,6 +190,11 @@ describe("webhooks", () => {
     expect(cart.emailHash).toBe(blindIndex("cliente@x.com"));
     expect(cart.totalPrice.toString()).toBe("49.9");
 
+    // El panel muestra el carrito con los datos descifrados y registra el acceso.
+    const list = await app.inject({ method: "GET", url: `/orgs/${orgId}/carts`, headers: { cookie } });
+    expect(list.json().carts[0]).toMatchObject({ email: "cliente@x.com", phone: "+573001112233", marketingConsent: true, totalPrice: "49.9" });
+    expect(await prisma.auditLog.count({ where: { action: "personal_data.accessed" } })).toBe(1);
+
     await webhook("orders/create", { id: 99, checkout_token: "tok1", email: "cliente@x.com", total_price: "49.90", currency: "USD", created_at: new Date().toISOString() });
     cart = await prisma.cart.findFirstOrThrow();
     expect(cart.status).toBe("COMPLETED");
