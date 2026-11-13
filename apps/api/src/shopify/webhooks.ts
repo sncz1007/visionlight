@@ -75,10 +75,11 @@ export async function handleOrderCreate(prisma: PrismaClient, storeId: string, p
   if (checkoutToken) {
     const cart = await prisma.cart.findUnique({ where: { storeId_checkoutToken: { storeId, checkoutToken } } });
     if (cart && cart.status !== "COMPLETED" && cart.status !== "RECOVERED") {
+      // Cuenta como recuperada solo si le enviamos el correo de recuperación antes de comprar.
+      const emailed = await prisma.recoveryEmail.findFirst({ where: { cartId: cart.id, status: { in: ["SENT", "DRY_RUN"] } } });
       await prisma.cart.update({
         where: { id: cart.id },
-        // Si ya lo habíamos marcado como abandonado, la compra cuenta como recuperada.
-        data: { status: cart.status === "ABANDONED" ? "RECOVERED" : "COMPLETED", completedAt: new Date() },
+        data: { status: emailed ? "RECOVERED" : "COMPLETED", completedAt: new Date() },
       });
     }
   }

@@ -1,8 +1,9 @@
 import { Queue, Worker } from "bullmq";
 import { Redis } from "ioredis";
+import { decrypt, sign } from "@visionlight/shared/crypto";
+import { sendWithResend } from "./email.js";
 
-// Procesador de tareas en segundo plano. En la fase 3 aquí vivirán
-// la detección de carritos abandonados y el envío de emails de recuperación.
+// Procesador de tareas en segundo plano: recuperación de carritos, limpieza y retención.
 const connection = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", { maxRetriesPerRequest: null });
 
 export const QUEUES = { maintenance: "maintenance" } as const;
@@ -17,6 +18,11 @@ const worker = new Worker(
       const { count } = await prisma.session.deleteMany({ where: { expiresAt: { lt: new Date() } } });
       return { deletedSessions: count };
     }
+    if (job.name === "recover-carts") {
+      const { prisma, processAbandonedCarts } = await import("@visionlight/database");
+      const appUrl = (process.env.APP_URL ?? "http://localhost:4000").replace(/\/$/, "");
+      return processAbandonedCarts(prisma, { decrypt, sign, appUrl, send: sendWithResend });
+    }
     if (job.name === "retention") {
       const { prisma, applyRetention } = await import("@visionlight/database");
       return applyRetention(prisma);
@@ -30,6 +36,8 @@ worker.on("failed", (job, err) => console.error(`[worker] ${job?.name} falló`, 
 
 // Borra sesiones vencidas cada hora.
 await maintenance.upsertJobScheduler("cleanup-sessions-hourly", { every: 60 * 60 * 1000 }, { name: "cleanup-sessions" });
+// Revisa cada 5 minutos si hay carritos abandonados para recuperar.
+await maintenance.upsertJobScheduler("recover-carts-5m", { every: 5 * 60 * 1000 }, { name: "recover-carts" });
 // Borra cada día los datos que superaron su plazo de retención.
 await maintenance.upsertJobScheduler("retention-daily", { pattern: "0 3 * * *" }, { name: "retention" });
 console.log("[worker] listo");

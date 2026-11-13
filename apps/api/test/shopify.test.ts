@@ -7,9 +7,9 @@ process.env.SHOPIFY_API_KEY = "test-key";
 process.env.SHOPIFY_API_SECRET = SECRET;
 process.env.APP_URL = "https://api.visionlight.test";
 
-const { prisma, applyRetention } = await import("@visionlight/database");
+const { prisma, applyRetention, processAbandonedCarts, unsubscribeToken } = await import("@visionlight/database");
 const { buildApp } = await import("../src/app.js");
-const { decrypt, blindIndex } = await import("../src/lib/crypto.js");
+const { decrypt, blindIndex, sign } = await import("../src/lib/crypto.js");
 const { normalizeShopDomain, verifyQueryHmac } = await import("../src/shopify/oauth.js");
 const { adminForStore } = await import("../src/shopify/store-admin.js");
 
@@ -78,7 +78,7 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
 beforeAll(async () => { vi.stubGlobal("fetch", fetchMock); app = await buildApp({ logger: false }); });
 afterAll(async () => { await app.close(); await prisma.$disconnect(); vi.unstubAllGlobals(); });
 beforeEach(async () => {
-  await prisma.$executeRawUnsafe('TRUNCATE "Event","Visitor","Cart","Order","Store","ShopifyOAuthState","WebhookReceipt","AuditLog","Session","Membership","User","Organization" CASCADE');
+  await prisma.$executeRawUnsafe('TRUNCATE "RecoveryEmail","Unsubscribe","Event","Visitor","Cart","Order","Store","ShopifyOAuthState","WebhookReceipt","AuditLog","Session","Membership","User","Organization" CASCADE');
 });
 afterEach(() => { fetchMock.mockClear(); pixelExists = false; pixelUpdates.length = 0; tokenRequests.length = 0; });
 
@@ -238,6 +238,75 @@ describe("Retención de datos", () => {
     const result = await applyRetention(prisma);
     expect(result.carts).toBe(1);
     expect((await prisma.cart.findMany()).map((c) => c.checkoutToken)).toEqual(["nuevo"]);
+  });
+});
+
+describe("Recuperación de carritos", () => {
+  const later = () => new Date(Date.now() + 2 * 60 * 60 * 1000); // 2 h después: pasó el tiempo de espera
+  const checkout = (token: string, email: string, consent = true) => ({
+    token, email, buyer_accepts_marketing: consent, total_price: "49.90", currency: "USD",
+    shipping_address: { first_name: "ana", last_name: "Pérez" },
+    line_items: [{ title: "Camiseta", quantity: 1, price: "49.90" }], abandoned_checkout_url: `https://x/recover/${token}`,
+  });
+  function deps() {
+    const sent: any[] = [];
+    return { sent, deps: { decrypt, sign, appUrl: "https://api.visionlight.test", now: later(), send: async (m: any) => { sent.push(m); return null; } } };
+  }
+
+  it("envía un solo correo, a quien aceptó, del carrito más reciente", async () => {
+    const { cookie, orgId } = await signup("a@a.com", "Empresa A");
+    await connectStore(cookie, orgId);
+    await webhook("checkouts/create", checkout("viejo", "ana@x.com"));
+    await webhook("checkouts/create", checkout("nuevo", "ANA@x.com"));
+    await webhook("checkouts/create", checkout("sin-permiso", "luis@x.com", false));
+    const { sent, deps: d } = deps();
+    const r = await processAbandonedCarts(prisma, d);
+    expect(r).toMatchObject({ abandoned: 3, dryRun: 1, skipped: 1 });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ to: "ana@x.com", subject: "Ana, dejaste algo en tu carrito" });
+    expect(sent[0].html).toContain("https://x/recover/nuevo");
+    expect(sent[0].html).toContain("https://api.visionlight.test/u/");
+    // Una segunda pasada no repite.
+    expect((await processAbandonedCarts(prisma, d)).dryRun).toBe(0);
+    expect(await prisma.auditLog.count({ where: { action: "personal_data.accessed" } })).toBe(1);
+  });
+
+  it("no escribe antes de tiempo ni a quien se dio de baja", async () => {
+    const { cookie, orgId } = await signup("a@a.com", "Empresa A");
+    await connectStore(cookie, orgId);
+    await webhook("checkouts/create", checkout("t1", "ana@x.com"));
+    const { sent, deps: d } = deps();
+    expect((await processAbandonedCarts(prisma, { ...d, now: new Date() })).abandoned).toBe(0);
+
+    const store = await prisma.store.findUniqueOrThrow({ where: { shopDomain: SHOP } });
+    const token = unsubscribeToken(store.id, blindIndex("ana@x.com"), sign);
+    expect((await app.inject({ method: "GET", url: `/u/${token}` })).statusCode).toBe(200);
+    expect((await app.inject({ method: "POST", url: `/u/${token}` })).statusCode).toBe(200);
+    expect((await app.inject({ method: "POST", url: `/u/${token}x` })).statusCode).toBe(400);
+    await processAbandonedCarts(prisma, d);
+    expect(sent).toHaveLength(0);
+    expect((await prisma.recoveryEmail.findFirstOrThrow()).error).toBe("Se dio de baja");
+  });
+
+  it("cuenta la venta como recuperada si compra después del correo", async () => {
+    const { cookie, orgId } = await signup("a@a.com", "Empresa A");
+    await connectStore(cookie, orgId);
+    await webhook("checkouts/create", checkout("t1", "ana@x.com"));
+    await processAbandonedCarts(prisma, deps().deps);
+    await webhook("orders/create", { id: 5, checkout_token: "t1", email: "ana@x.com", total_price: "49.90", currency: "USD", created_at: new Date().toISOString() });
+    expect((await prisma.cart.findFirstOrThrow()).status).toBe("RECOVERED");
+    const act = await app.inject({ method: "GET", url: `/orgs/${orgId}/activity`, headers: { cookie } });
+    expect(act.json().recovery).toMatchObject({ emailsSent: 1, recoveredCarts: 1, recoveredRevenue: "49.9" });
+  });
+
+  it("solo administradores cambian los ajustes, y con valores permitidos", async () => {
+    const { cookie, orgId } = await signup("a@a.com", "Empresa A");
+    await connectStore(cookie, orgId);
+    const store = await prisma.store.findUniqueOrThrow({ where: { shopDomain: SHOP } });
+    const url = `/orgs/${orgId}/stores/${store.id}/recovery`;
+    expect((await app.inject({ method: "PATCH", url, headers: { cookie }, payload: { enabled: true, delayMinutes: 7 } })).statusCode).toBe(400);
+    expect((await app.inject({ method: "PATCH", url, headers: { cookie }, payload: { enabled: false, delayMinutes: 180 } })).statusCode).toBe(200);
+    expect(await prisma.store.findUniqueOrThrow({ where: { id: store.id } })).toMatchObject({ recoveryEnabled: false, recoveryDelayMinutes: 180 });
   });
 });
 
