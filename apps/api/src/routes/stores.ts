@@ -53,7 +53,7 @@ export async function storeRoutes(app: FastifyInstance) {
     });
     await logPersonalDataAccess(app.prisma, {
       organizationId: orgId, userId: req.user!.id, ip: req.ip, resource: "cart",
-      recordIds: carts.filter((c) => c.emailEnc || c.phoneEnc).map((c) => c.id), purpose: "panel: lista de carritos",
+      recordIds: carts.filter((c) => c.emailEnc || c.phoneEnc || c.nameEnc).map((c) => c.id), purpose: "panel: lista de carritos",
     });
     return {
       carts: carts.map((c) => ({
@@ -62,6 +62,7 @@ export async function storeRoutes(app: FastifyInstance) {
         status: c.status,
         email: decryptOptional(c.emailEnc),
         phone: decryptOptional(c.phoneEnc),
+        name: decryptOptional(c.nameEnc),
         marketingConsent: c.marketingConsent,
         totalPrice: c.totalPrice.toString(),
         currency: c.currency,

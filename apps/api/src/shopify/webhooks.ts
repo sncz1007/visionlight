@@ -20,13 +20,23 @@ function slimLineItems(items: unknown): Prisma.InputJsonValue {
   }));
 }
 
+// El teléfono y el nombre pueden venir en el cliente o en las direcciones del pago.
+function contactOf(p: Json) {
+  const addr = [p.shipping_address, p.billing_address, p.customer?.default_address].filter(Boolean) as Json[];
+  const phone = p.phone || p.customer?.phone || addr.find((a) => a.phone)?.phone || null;
+  const named = [p.customer, ...addr].find((x) => x?.first_name || x?.last_name);
+  const name = named ? [named.first_name, named.last_name].filter(Boolean).join(" ").trim() || null : null;
+  return { phone: phone ? String(phone).slice(0, 40) : null, name: name ? name.slice(0, 120) : null };
+}
+
 export async function handleCheckout(prisma: PrismaClient, storeId: string, p: Json) {
   const token = p.token ?? p.cart_token;
   if (!token) return;
   const completed = Boolean(p.completed_at);
   const data = {
     ...protectEmail(p.email ?? p.customer?.email),
-    phoneEnc: encryptOptional(p.phone ?? p.customer?.phone),
+    phoneEnc: encryptOptional(contactOf(p).phone),
+    nameEnc: encryptOptional(contactOf(p).name),
     customerId: p.customer?.id ? String(p.customer.id) : null,
     totalPrice: money(p.total_price),
     currency: p.presentment_currency ?? p.currency ?? "USD",

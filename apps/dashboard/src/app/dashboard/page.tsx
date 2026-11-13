@@ -12,7 +12,7 @@ type Activity = {
 };
 
 type CartRow = {
-  id: string; shop: string; status: "OPEN" | "ABANDONED"; email: string | null; phone: string | null;
+  id: string; shop: string; status: "OPEN" | "ABANDONED"; email: string | null; phone: string | null; name: string | null;
   marketingConsent: boolean; totalPrice: string; currency: string; recoveryUrl: string | null; updatedAt: string;
   lineItems: { title: string; quantity: number; price: string }[];
 };
@@ -200,7 +200,8 @@ export default function Dashboard() {
                 <li key={c.id} className="px-5 py-4 text-sm">
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
-                      <p className="font-medium">{c.email ?? "Sin correo todavía"}</p>
+                      {c.name && <p className="font-medium">{c.name}</p>}
+                      <p className={c.name ? "text-slate-600" : "font-medium"}>{c.email ?? "Sin correo todavía"}</p>
                       {c.phone && <p className="text-slate-500">{c.phone}</p>}
                     </div>
                     <div className="text-right">

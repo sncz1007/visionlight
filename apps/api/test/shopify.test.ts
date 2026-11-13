@@ -178,7 +178,7 @@ describe("webhooks", () => {
   it("guarda el carrito y lo cierra cuando llega el pedido", async () => {
     const { cookie, orgId } = await signup("a@a.com", "Empresa A");
     await connectStore(cookie, orgId);
-    const checkout = { token: "tok1", email: "Cliente@X.com", phone: "+573001112233", total_price: "49.90", currency: "USD", buyer_accepts_marketing: true, line_items: [{ product_id: 1, variant_id: 2, title: "Camiseta", quantity: 1, price: "49.90" }], abandoned_checkout_url: "https://x/recover" };
+    const checkout = { token: "tok1", email: "Cliente@X.com", shipping_address: { first_name: "Ana", last_name: "Pérez", phone: "+573001112233" }, total_price: "49.90", currency: "USD", buyer_accepts_marketing: true, line_items: [{ product_id: 1, variant_id: 2, title: "Camiseta", quantity: 1, price: "49.90" }], abandoned_checkout_url: "https://x/recover" };
     expect((await webhook("checkouts/create", checkout)).statusCode).toBe(200);
     let cart = await prisma.cart.findFirstOrThrow();
     expect(cart).toMatchObject({ status: "OPEN", marketingConsent: true });
@@ -192,7 +192,7 @@ describe("webhooks", () => {
 
     // El panel muestra el carrito con los datos descifrados y registra el acceso.
     const list = await app.inject({ method: "GET", url: `/orgs/${orgId}/carts`, headers: { cookie } });
-    expect(list.json().carts[0]).toMatchObject({ email: "cliente@x.com", phone: "+573001112233", marketingConsent: true, totalPrice: "49.9" });
+    expect(list.json().carts[0]).toMatchObject({ email: "cliente@x.com", phone: "+573001112233", name: "Ana Pérez", marketingConsent: true, totalPrice: "49.9" });
     expect(await prisma.auditLog.count({ where: { action: "personal_data.accessed" } })).toBe(1);
 
     await webhook("orders/create", { id: 99, checkout_token: "tok1", email: "cliente@x.com", total_price: "49.90", currency: "USD", created_at: new Date().toISOString() });

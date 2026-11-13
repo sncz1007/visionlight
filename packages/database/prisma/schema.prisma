@@ -183,6 +183,7 @@ model Cart {
   emailEnc      String?
   emailHash     String?
   phoneEnc      String?
+  nameEnc       String?
   customerId    String?
   totalPrice    Decimal    @db.Decimal(12, 2)
   currency      String
