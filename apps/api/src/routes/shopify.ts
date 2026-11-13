@@ -79,14 +79,18 @@ export async function shopifyRoutes(app: FastifyInstance) {
       },
     });
 
-    // Webhooks y pixel: si fallan, la tienda queda conectada y se puede reintentar.
+    // Webhooks y pixel por separado: si uno falla, el otro se configura igual y la tienda queda conectada.
     try {
       const errors = await registerWebhooks(admin);
       if (errors.length) req.log.warn({ errors }, "Algunos webhooks no se registraron");
+    } catch (err) {
+      req.log.error(err, "Fallo registrando webhooks");
+    }
+    try {
       const webPixelId = await createWebPixel(admin, pixelKey);
       if (webPixelId) await app.prisma.store.update({ where: { id: store.id }, data: { webPixelId } });
     } catch (err) {
-      req.log.error(err, "Fallo configurando webhooks o Web Pixel");
+      req.log.error(err, "Fallo configurando el Web Pixel");
     }
 
     await audit(app.prisma, {

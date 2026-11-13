@@ -9,7 +9,12 @@ export class ShopifyAdmin {
       headers: { "content-type": "application/json", "x-shopify-access-token": this.accessToken },
       body: JSON.stringify({ query, variables }),
     });
-    if (!res.ok) throw new Error(`Shopify GraphQL respondió ${res.status}`);
+    if (!res.ok) {
+      // Incluimos la respuesta de Shopify: explica el motivo (p. ej. un permiso que falta).
+      const detail = (await res.text().catch(() => "")).slice(0, 500);
+      const op = query.match(/\b(webhookSubscriptionCreate|webPixelCreate|webPixelUpdate|webPixel|shop)\b/)?.[1] ?? "consulta";
+      throw new Error(`Shopify GraphQL respondió ${res.status} en ${op}: ${detail}`);
+    }
     const body = (await res.json()) as { data?: T; errors?: unknown };
     if (body.errors || !body.data) throw new Error(`Shopify GraphQL: ${JSON.stringify(body.errors)}`);
     return body.data;
@@ -29,6 +34,7 @@ export const WEBHOOK_TOPICS = ["CHECKOUTS_CREATE", "CHECKOUTS_UPDATE", "ORDERS_C
 export async function registerWebhooks(admin: ShopifyAdmin): Promise<string[]> {
   const errors: string[] = [];
   for (const topic of WEBHOOK_TOPICS) {
+    // Cada tema por separado: si uno falla (p. ej. falta un permiso), los demás se registran igual.
     const data = await admin.graphql<{
       webhookSubscriptionCreate: { userErrors: { message: string }[] };
     }>(
@@ -38,7 +44,11 @@ export async function registerWebhooks(admin: ShopifyAdmin): Promise<string[]> {
         }
       }`,
       { topic, uri: `${config.appUrl}/webhooks/shopify` },
-    );
+    ).catch((err: Error) => {
+      errors.push(`${topic}: ${err.message}`);
+      return null;
+    });
+    if (!data) continue;
     for (const e of data.webhookSubscriptionCreate.userErrors) {
       // "already been taken" significa que ya existía: no es un error real.
       if (!/taken/i.test(e.message)) errors.push(`${topic}: ${e.message}`);
