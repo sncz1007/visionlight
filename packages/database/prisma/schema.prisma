@@ -105,6 +105,10 @@ model Store {
   currency       String?
   // Token de acceso cifrado con AES-256-GCM. Nunca se guarda en texto plano.
   accessTokenEnc String?
+  // Shopify exige tokens que vencen (1 h) y se renuevan con un refresh token (90 días).
+  accessTokenExpiresAt  DateTime?
+  refreshTokenEnc       String?
+  refreshTokenExpiresAt DateTime?
   scopes         String?
   status         StoreStatus  @default(ACTIVE)
   // Clave pública que usa el Web Pixel para enviar eventos de esta tienda.

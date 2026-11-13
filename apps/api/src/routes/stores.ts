@@ -44,7 +44,7 @@ export async function storeRoutes(app: FastifyInstance) {
     const { storeId } = req.params as { storeId: string };
     const store = await app.prisma.store.findFirst({ where: { id: storeId, organizationId: req.membership!.organizationId } });
     if (!store) return reply.code(404).send({ error: "Tienda no encontrada" });
-    await app.prisma.store.update({ where: { id: store.id }, data: { status: "UNINSTALLED", accessTokenEnc: null, uninstalledAt: new Date() } });
+    await app.prisma.store.update({ where: { id: store.id }, data: { status: "UNINSTALLED", accessTokenEnc: null, refreshTokenEnc: null, uninstalledAt: new Date() } });
     await audit(app.prisma, { action: "store.disconnected", userId: req.user!.id, organizationId: store.organizationId, ip: req.ip, metadata: { shop: store.shopDomain } });
     return { ok: true };
   });

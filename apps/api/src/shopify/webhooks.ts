@@ -77,7 +77,7 @@ export async function handleOrderCreate(prisma: PrismaClient, storeId: string, p
 export async function handleAppUninstalled(prisma: PrismaClient, storeId: string) {
   await prisma.store.update({
     where: { id: storeId },
-    data: { status: "UNINSTALLED", accessTokenEnc: null, uninstalledAt: new Date(), webPixelId: null },
+    data: { status: "UNINSTALLED", accessTokenEnc: null, refreshTokenEnc: null, accessTokenExpiresAt: null, refreshTokenExpiresAt: null, uninstalledAt: new Date(), webPixelId: null },
   });
 }
 

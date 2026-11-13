@@ -2,11 +2,11 @@ import type { FastifyInstance } from "fastify";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { config, shopifyConfigured } from "../lib/config.js";
-import { encrypt } from "../lib/crypto.js";
 import { audit } from "../lib/audit.js";
 import {
   buildAuthorizeUrl, exchangeCodeForToken, isValidShopDomain, normalizeShopDomain, verifyQueryHmac, verifyWebhookHmac,
 } from "../shopify/oauth.js";
+import { tokenFields } from "../shopify/store-admin.js";
 import { ShopifyAdmin, createWebPixel, registerWebhooks } from "../shopify/admin.js";
 import {
   handleAppUninstalled, handleCheckout, handleCustomerRedact, handleOrderCreate, handleShopRedact,
@@ -50,15 +50,15 @@ export async function shopifyRoutes(app: FastifyInstance) {
     if (state) await app.prisma.shopifyOAuthState.delete({ where: { id: state.id } });
     if (!state || state.expiresAt < new Date() || state.shopDomain !== q.shop) return fail("state");
 
-    let accessToken: string, scope: string;
+    let tokens: Awaited<ReturnType<typeof exchangeCodeForToken>>;
     try {
-      ({ accessToken, scope } = await exchangeCodeForToken(q.shop, q.code));
+      tokens = await exchangeCodeForToken(q.shop, q.code);
     } catch (err) {
       req.log.error(err, "Fallo al intercambiar el código OAuth");
       return fail("token");
     }
 
-    const admin = new ShopifyAdmin(q.shop, accessToken);
+    const admin = new ShopifyAdmin(q.shop, tokens.accessToken);
     const info = await admin.getShopInfo().catch(() => null);
     const prior = await app.prisma.store.findUnique({ where: { shopDomain: q.shop } });
     if (prior && prior.organizationId !== state.organizationId && prior.status === "ACTIVE") return fail("taken");
@@ -70,11 +70,11 @@ export async function shopifyRoutes(app: FastifyInstance) {
       where: { shopDomain: q.shop },
       create: {
         organizationId: state.organizationId, shopDomain: q.shop, name: info?.name, currency: info?.currencyCode,
-        accessTokenEnc: encrypt(accessToken), scopes: scope, pixelKey,
+        ...tokenFields(tokens), scopes: tokens.scope, pixelKey,
       },
       update: {
         organizationId: state.organizationId, name: info?.name, currency: info?.currencyCode,
-        accessTokenEnc: encrypt(accessToken), scopes: scope, status: "ACTIVE", uninstalledAt: null, pixelKey,
+        ...tokenFields(tokens), scopes: tokens.scope, status: "ACTIVE", uninstalledAt: null, pixelKey,
         installedAt: new Date(),
       },
     });

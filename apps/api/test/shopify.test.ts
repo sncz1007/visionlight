@@ -11,6 +11,7 @@ const { prisma, applyRetention } = await import("@visionlight/database");
 const { buildApp } = await import("../src/app.js");
 const { decrypt, blindIndex } = await import("../src/lib/crypto.js");
 const { normalizeShopDomain, verifyQueryHmac } = await import("../src/shopify/oauth.js");
+const { adminForStore } = await import("../src/shopify/store-admin.js");
 
 let app: FastifyInstance;
 const SHOP = "visionlight-demo.myshopify.com";
@@ -46,9 +47,17 @@ async function connectStore(cookie: string, orgId: string) {
 
 // Simula las respuestas de Shopify.
 let pixelExists = false;
+const tokenRequests: Record<string, string>[] = [];
 const pixelUpdates: any[] = [];
 const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-  if (url.endsWith("/admin/oauth/access_token")) return Response.json({ access_token: "shpat_secreto", scope: "read_orders" });
+  if (url.endsWith("/admin/oauth/access_token")) {
+    const form = new URLSearchParams(String(init?.body ?? ""));
+    tokenRequests.push(Object.fromEntries(form));
+    if (form.get("grant_type") === "refresh_token") {
+      return Response.json({ access_token: "shpat_renovado", scope: "read_orders", expires_in: 3600, refresh_token: "shprt_nuevo", refresh_token_expires_in: 7776000 });
+    }
+    return Response.json({ access_token: "shpat_secreto", scope: "read_orders", expires_in: 3600, refresh_token: "shprt_inicial", refresh_token_expires_in: 7776000 });
+  }
   const body = JSON.parse(String(init?.body ?? "{}"));
   if (body.query?.includes("shop {")) return Response.json({ data: { shop: { name: "Demo", currencyCode: "USD" } } });
   if (body.query?.includes("webhookSubscriptionCreate")) return Response.json({ data: { webhookSubscriptionCreate: { userErrors: [] } } });
@@ -71,7 +80,7 @@ afterAll(async () => { await app.close(); await prisma.$disconnect(); vi.unstubA
 beforeEach(async () => {
   await prisma.$executeRawUnsafe('TRUNCATE "Event","Visitor","Cart","Order","Store","ShopifyOAuthState","WebhookReceipt","AuditLog","Session","Membership","User","Organization" CASCADE');
 });
-afterEach(() => { fetchMock.mockClear(); pixelExists = false; pixelUpdates.length = 0; });
+afterEach(() => { fetchMock.mockClear(); pixelExists = false; pixelUpdates.length = 0; tokenRequests.length = 0; });
 
 describe("utilidades OAuth", () => {
   it("normaliza dominios y rechaza los que no son de Shopify", () => {
@@ -97,6 +106,11 @@ describe("conexión de tienda", () => {
     expect(store.accessTokenEnc).not.toContain("shpat_secreto");
     expect(decrypt(store.accessTokenEnc!)).toBe("shpat_secreto");
     expect(store.webPixelId).toBe("gid://shopify/WebPixel/1");
+    // Pide tokens que vencen y guarda el refresh token cifrado.
+    expect(tokenRequests[0]).toMatchObject({ code: "abc", expiring: "1" });
+    expect(store.accessTokenExpiresAt!.getTime()).toBeGreaterThan(Date.now());
+    expect(store.refreshTokenEnc).not.toContain("shprt_inicial");
+    expect(decrypt(store.refreshTokenEnc!)).toBe("shprt_inicial");
     const list = await app.inject({ method: "GET", url: `/orgs/${orgId}/stores`, headers: { cookie } });
     expect(list.json().stores[0]).toMatchObject({ shopDomain: SHOP, pixelActive: true });
     expect(JSON.stringify(list.json())).not.toContain("accessToken");
@@ -114,6 +128,20 @@ describe("conexión de tienda", () => {
     expect(JSON.parse(pixelUpdates[0].webPixel.settings === undefined ? "{}" : JSON.stringify(pixelUpdates[0].webPixel.settings))).toMatchObject({
       accountID: before.pixelKey, ingestUrl: "https://api.visionlight.test/ingest/pixel",
     });
+  });
+
+  it("renueva el token cuando está por vencer", async () => {
+    const { cookie, orgId } = await signup("a@a.com", "Empresa A");
+    await connectStore(cookie, orgId);
+    let store = await prisma.store.findUniqueOrThrow({ where: { shopDomain: SHOP } });
+    await adminForStore(prisma, store);
+    expect(tokenRequests).toHaveLength(1); // vigente: no renueva
+    store = await prisma.store.update({ where: { id: store.id }, data: { accessTokenExpiresAt: new Date(Date.now() + 60_000) } });
+    await adminForStore(prisma, store);
+    expect(tokenRequests[1]).toMatchObject({ grant_type: "refresh_token", refresh_token: "shprt_inicial" });
+    store = await prisma.store.findUniqueOrThrow({ where: { id: store.id } });
+    expect(decrypt(store.accessTokenEnc!)).toBe("shpat_renovado");
+    expect(decrypt(store.refreshTokenEnc!)).toBe("shprt_nuevo");
   });
 
   it("rechaza un callback con firma falsa", async () => {

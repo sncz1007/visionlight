@@ -52,14 +52,41 @@ export function buildAuthorizeUrl(shop: string, nonce: string): string {
   return `https://${shop}/admin/oauth/authorize?${params}`;
 }
 
-export async function exchangeCodeForToken(shop: string, code: string): Promise<{ accessToken: string; scope: string }> {
+export type ShopifyTokens = {
+  accessToken: string;
+  scope: string;
+  accessTokenExpiresAt: Date | null;
+  refreshToken: string | null;
+  refreshTokenExpiresAt: Date | null;
+};
+
+async function requestToken(shop: string, params: Record<string, string>): Promise<ShopifyTokens> {
   const res = await fetch(`https://${shop}/admin/oauth/access_token`, {
     method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json" },
-    body: JSON.stringify({ client_id: config.shopify.apiKey, client_secret: config.shopify.apiSecret, code }),
+    headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
+    body: new URLSearchParams({ client_id: config.shopify.apiKey, client_secret: config.shopify.apiSecret, ...params }).toString(),
   });
-  if (!res.ok) throw new Error(`Shopify rechazó el código OAuth (${res.status})`);
-  const body = (await res.json()) as { access_token?: string; scope?: string };
+  if (!res.ok) throw new Error(`Shopify rechazó la solicitud de token (${res.status}): ${(await res.text().catch(() => "")).slice(0, 300)}`);
+  const body = (await res.json()) as {
+    access_token?: string; scope?: string; expires_in?: number; refresh_token?: string; refresh_token_expires_in?: number;
+  };
   if (!body.access_token) throw new Error("Shopify no devolvió un token de acceso");
-  return { accessToken: body.access_token, scope: body.scope ?? "" };
+  const inSeconds = (s?: number) => (typeof s === "number" ? new Date(Date.now() + s * 1000) : null);
+  return {
+    accessToken: body.access_token,
+    scope: body.scope ?? "",
+    accessTokenExpiresAt: inSeconds(body.expires_in),
+    refreshToken: body.refresh_token ?? null,
+    refreshTokenExpiresAt: inSeconds(body.refresh_token_expires_in),
+  };
+}
+
+/** Cambia el código OAuth por un token offline que vence (expiring=1), como exige Shopify. */
+export function exchangeCodeForToken(shop: string, code: string): Promise<ShopifyTokens> {
+  return requestToken(shop, { code, expiring: "1" });
+}
+
+/** Renueva un token vencido o por vencer. Shopify devuelve también un refresh token nuevo. */
+export function refreshAccessToken(shop: string, refreshToken: string): Promise<ShopifyTokens> {
+  return requestToken(shop, { grant_type: "refresh_token", refresh_token: refreshToken });
 }

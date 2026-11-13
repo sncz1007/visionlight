@@ -19,7 +19,8 @@ function setSessionCookie(reply: FastifyReply, token: string, expiresAt: Date) {
 }
 
 export async function authRoutes(app: FastifyInstance) {
-  const strictLimit = { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } };
+  // En las pruebas automáticas se crean muchas cuentas seguidas desde la misma IP.
+  const strictLimit = { config: { rateLimit: { max: process.env.VITEST ? 1000 : 10, timeWindow: "1 minute" } } };
 
   app.post("/auth/signup", strictLimit, async (req, reply) => {
     const parsed = signupSchema.safeParse(req.body);
