@@ -4,9 +4,19 @@ import { useRouter } from "next/navigation";
 import { api, type Me } from "@/lib/api";
 
 type Member = { id: string; role: string; user: { email: string; name: string | null } };
-type Store = { id: string; shopDomain: string; name: string | null; status: "ACTIVE" | "UNINSTALLED"; pixelActive: boolean };
+type Store = {
+  id: string; shopDomain: string; name: string | null; status: "ACTIVE" | "UNINSTALLED"; pixelActive: boolean;
+  recoveryEnabled: boolean; recoveryDelayMinutes: number;
+};
+const DELAYS = [
+  { value: 30, label: "30 minutos" },
+  { value: 60, label: "1 hora" },
+  { value: 180, label: "3 horas" },
+  { value: 1440, label: "24 horas" },
+];
 type Activity = {
   last7Days: { visitors: number; productViews: number; addToCarts: number; orders: number; revenue: string };
+  recovery: { emailsSent: number; recoveredCarts: number; recoveredRevenue: string };
   openCarts: number;
   recentEvents: { id: string; name: string; url: string | null; occurredAt: string; shop: string }[];
 };
@@ -15,7 +25,17 @@ type CartRow = {
   id: string; shop: string; status: "OPEN" | "ABANDONED"; email: string | null; phone: string | null; name: string | null;
   marketingConsent: boolean; totalPrice: string; currency: string; recoveryUrl: string | null; updatedAt: string;
   lineItems: { title: string; quantity: number; price: string }[];
+  recoveryEmail: { status: "SENT" | "DRY_RUN" | "SKIPPED" | "FAILED"; sentAt: string; error: string | null } | null;
 };
+
+function emailBadge(e: CartRow["recoveryEmail"]) {
+  if (!e) return null;
+  const when = new Date(e.sentAt).toLocaleString("es");
+  if (e.status === "SENT") return { cls: "bg-indigo-50 text-indigo-700", text: `Email enviado · ${when}` };
+  if (e.status === "DRY_RUN") return { cls: "bg-indigo-50 text-indigo-700", text: `Email de prueba (sin enviar) · ${when}` };
+  if (e.status === "FAILED") return { cls: "bg-red-50 text-red-700", text: "El email falló" };
+  return { cls: "bg-slate-100 text-slate-500", text: `Sin email: ${e.error ?? "omitido"}` };
+}
 
 const EVENT_LABELS: Record<string, string> = {
   page_viewed: "Vio una página",
@@ -90,6 +110,21 @@ export default function Dashboard() {
     }
   }
 
+  async function saveRecovery(store: Store, patch: Partial<Pick<Store, "recoveryEnabled" | "recoveryDelayMinutes">>) {
+    if (!org) return;
+    const next = { ...store, ...patch };
+    setStores((list) => list.map((s) => (s.id === store.id ? next : s)));
+    try {
+      await api(`/orgs/${org.id}/stores/${store.id}/recovery`, {
+        method: "PATCH",
+        body: JSON.stringify({ enabled: next.recoveryEnabled, delayMinutes: next.recoveryDelayMinutes }),
+      });
+    } catch (err) {
+      setStores((list) => list.map((s) => (s.id === store.id ? store : s)));
+      setNotice({ kind: "error", text: (err as Error).message });
+    }
+  }
+
   async function logout() {
     await api("/auth/logout", { method: "POST" });
     router.replace("/login");
@@ -98,7 +133,8 @@ export default function Dashboard() {
   if (!me) return <p className="p-8 text-slate-500">Cargando…</p>;
   const hasStore = stores.some((s) => s.status === "ACTIVE");
   const stats = activity?.last7Days;
-  const revenue = Number(stats?.revenue ?? 0).toLocaleString("es", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const money = (v?: string) => Number(v ?? 0).toLocaleString("es", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const revenue = money(stats?.revenue);
   const cards = [
     { label: "Visitantes (7 días)", value: stats?.visitors ?? 0 },
     { label: "Productos vistos", value: stats?.productViews ?? 0 },
@@ -106,6 +142,8 @@ export default function Dashboard() {
     { label: "Carritos abiertos", value: activity?.openCarts ?? 0 },
     { label: "Pedidos (7 días)", value: stats?.orders ?? 0 },
     { label: "Ventas (7 días)", value: `$${revenue}` },
+    { label: "Emails de recuperación (7 días)", value: activity?.recovery.emailsSent ?? 0 },
+    { label: "Ventas recuperadas (7 días)", value: `$${money(activity?.recovery.recoveredRevenue)}` },
   ];
 
   return (
@@ -161,6 +199,31 @@ export default function Dashboard() {
                       </span>
                     )}
                   </span>
+                  {s.status === "ACTIVE" && (
+                    <div className="flex w-full flex-wrap items-center gap-3 text-slate-600">
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={s.recoveryEnabled}
+                          disabled={!canManage}
+                          onChange={(e) => saveRecovery(s, { recoveryEnabled: e.target.checked })}
+                        />
+                        Enviar emails de recuperación
+                      </label>
+                      <label className="flex items-center gap-2">
+                        después de
+                        <select
+                          value={s.recoveryDelayMinutes}
+                          disabled={!canManage || !s.recoveryEnabled}
+                          onChange={(e) => saveRecovery(s, { recoveryDelayMinutes: Number(e.target.value) })}
+                          className="rounded-md border border-slate-300 bg-white px-2 py-1"
+                        >
+                          {DELAYS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
+                        </select>
+                        sin comprar
+                      </label>
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>
@@ -183,7 +246,7 @@ export default function Dashboard() {
           )}
         </section>
 
-        <section className="mt-8 grid grid-cols-2 gap-4 lg:grid-cols-3">
+        <section className="mt-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
           {cards.map((c) => (
             <div key={c.label} className="rounded-xl border border-slate-200 bg-white p-5">
               <p className="text-sm text-slate-500">{c.label}</p>
@@ -221,6 +284,9 @@ export default function Dashboard() {
                     <span className="rounded-full bg-amber-50 px-2 py-0.5 text-amber-700">
                       {c.status === "ABANDONED" ? "Abandonado" : "Abierto"}
                     </span>
+                    {emailBadge(c.recoveryEmail) && (
+                      <span className={`rounded-full px-2 py-0.5 ${emailBadge(c.recoveryEmail)!.cls}`}>{emailBadge(c.recoveryEmail)!.text}</span>
+                    )}
                     {c.recoveryUrl && (
                       <a href={c.recoveryUrl} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">
                         Enlace de recuperación

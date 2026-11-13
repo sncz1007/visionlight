@@ -23,7 +23,7 @@ async function signup(email: string, org: string) {
 beforeAll(async () => { app = await buildApp({ logger: false }); });
 afterAll(async () => { await app.close(); await prisma.$disconnect(); });
 beforeEach(async () => {
-  await prisma.$executeRawUnsafe('TRUNCATE "Event","Visitor","Cart","Order","Store","ShopifyOAuthState","WebhookReceipt","AuditLog","Session","Membership","User","Organization" CASCADE');
+  await prisma.$executeRawUnsafe('TRUNCATE "RecoveryEmail","Unsubscribe","Event","Visitor","Cart","Order","Store","ShopifyOAuthState","WebhookReceipt","AuditLog","Session","Membership","User","Organization" CASCADE');
 });
 
 describe("auth", () => {

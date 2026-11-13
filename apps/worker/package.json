@@ -8,6 +8,15 @@
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit"
   },
-  "dependencies": { "@visionlight/database": "workspace:*", "bullmq": "5.81.5", "ioredis": "5.11.1" },
-  "devDependencies": { "@types/node": "22.15.30", "tsx": "4.23.15", "typescript": "5.9.3" }
+  "dependencies": {
+    "@visionlight/database": "workspace:*",
+    "bullmq": "5.81.5",
+    "ioredis": "5.11.1",
+    "@visionlight/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "22.15.30",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3"
+  }
 }

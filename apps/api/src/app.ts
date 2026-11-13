@@ -11,6 +11,7 @@ import { orgRoutes } from "./routes/orgs.js";
 import { shopifyRoutes } from "./routes/shopify.js";
 import { ingestRoutes } from "./routes/ingest.js";
 import { storeRoutes } from "./routes/stores.js";
+import { recoveryRoutes } from "./routes/recovery.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -19,7 +20,7 @@ declare module "fastify" {
 }
 
 export async function buildApp(opts: { prisma?: PrismaClient; logger?: boolean } = {}) {
-  const app = Fastify({ logger: opts.logger ?? true, trustProxy: true });
+  const app = Fastify({ logger: opts.logger ?? true, trustProxy: true, maxParamLength: 300 });
   app.decorate("prisma", opts.prisma ?? defaultPrisma);
 
   await app.register(helmet);
@@ -36,6 +37,7 @@ export async function buildApp(opts: { prisma?: PrismaClient; logger?: boolean }
   await app.register(authRoutes);
   await app.register(orgRoutes);
   await app.register(storeRoutes);
+  await app.register(recoveryRoutes);
   await app.register(shopifyRoutes);
   await app.register(ingestRoutes);
 

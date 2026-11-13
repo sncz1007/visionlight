@@ -9,7 +9,10 @@ export async function storeRoutes(app: FastifyInstance) {
   app.get("/orgs/:orgId/stores", anyMember, async (req) => {
     const stores = await app.prisma.store.findMany({
       where: { organizationId: req.membership!.organizationId },
-      select: { id: true, shopDomain: true, name: true, status: true, currency: true, installedAt: true, webPixelId: true },
+      select: {
+        id: true, shopDomain: true, name: true, status: true, currency: true, installedAt: true, webPixelId: true,
+        recoveryEnabled: true, recoveryDelayMinutes: true,
+      },
       orderBy: { installedAt: "desc" },
     });
     return { stores: stores.map(({ webPixelId, ...s }) => ({ ...s, pixelActive: Boolean(webPixelId) })) };
@@ -20,7 +23,7 @@ export async function storeRoutes(app: FastifyInstance) {
     const orgId = req.membership!.organizationId;
     const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const storeFilter = { store: { organizationId: orgId } };
-    const [visitors, productViews, addToCarts, openCarts, orders, revenue, recent] = await Promise.all([
+    const [visitors, productViews, addToCarts, openCarts, orders, revenue, recent, emailsSent, recovered] = await Promise.all([
       app.prisma.visitor.count({ where: { ...storeFilter, lastSeen: { gte: since } } }),
       app.prisma.event.count({ where: { ...storeFilter, name: "product_viewed", occurredAt: { gte: since } } }),
       app.prisma.event.count({ where: { ...storeFilter, name: "product_added_to_cart", occurredAt: { gte: since } } }),
@@ -33,10 +36,13 @@ export async function storeRoutes(app: FastifyInstance) {
         take: 20,
         select: { id: true, name: true, url: true, occurredAt: true, store: { select: { shopDomain: true } } },
       }),
+      app.prisma.recoveryEmail.count({ where: { ...storeFilter, status: { in: ["SENT", "DRY_RUN"] }, sentAt: { gte: since } } }),
+      app.prisma.cart.aggregate({ where: { ...storeFilter, status: "RECOVERED", completedAt: { gte: since } }, _sum: { totalPrice: true }, _count: true }),
     ]);
     return {
       last7Days: { visitors, productViews, addToCarts, orders, revenue: revenue._sum.totalPrice?.toString() ?? "0" },
       openCarts,
+      recovery: { emailsSent, recoveredCarts: recovered._count, recoveredRevenue: recovered._sum.totalPrice?.toString() ?? "0" },
       recentEvents: recent.map((e) => ({ id: e.id, name: e.name, url: e.url, occurredAt: e.occurredAt, shop: e.store.shopDomain })),
     };
   });
@@ -49,7 +55,7 @@ export async function storeRoutes(app: FastifyInstance) {
       where: { store: { organizationId: orgId }, status: { in: ["OPEN", "ABANDONED"] } },
       orderBy: { updatedAt: "desc" },
       take: 50,
-      include: { store: { select: { shopDomain: true } } },
+      include: { store: { select: { shopDomain: true } }, recoveryEmail: { select: { status: true, sentAt: true, error: true } } },
     });
     await logPersonalDataAccess(app.prisma, {
       organizationId: orgId, userId: req.user!.id, ip: req.ip, resource: "cart",
@@ -68,6 +74,7 @@ export async function storeRoutes(app: FastifyInstance) {
         currency: c.currency,
         lineItems: c.lineItems,
         recoveryUrl: c.recoveryUrl,
+        recoveryEmail: c.recoveryEmail,
         updatedAt: c.updatedAt,
       })),
     };

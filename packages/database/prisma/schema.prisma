@@ -109,6 +109,9 @@ model Store {
   accessTokenExpiresAt  DateTime?
   refreshTokenEnc       String?
   refreshTokenExpiresAt DateTime?
+  // Recuperación de carritos: activa por defecto, primer email tras este tiempo sin comprar.
+  recoveryEnabled       Boolean  @default(true)
+  recoveryDelayMinutes  Int      @default(60)
   scopes         String?
   status         StoreStatus  @default(ACTIVE)
   // Clave pública que usa el Web Pixel para enviar eventos de esta tienda.
@@ -122,6 +125,8 @@ model Store {
   visitors       Visitor[]
   events         Event[]
   carts          Cart[]
+  recoveryEmails RecoveryEmail[]
+  unsubscribes   Unsubscribe[]
   orders         Order[]
 
   @@index([organizationId])
@@ -194,7 +199,9 @@ model Cart {
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
   completedAt   DateTime?
+  abandonedAt   DateTime?
   store         Store      @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  recoveryEmail RecoveryEmail?
 
   @@unique([storeId, checkoutToken])
   @@index([storeId, status, updatedAt])
@@ -229,4 +236,40 @@ model WebhookReceipt {
   receivedAt DateTime @default(now())
 
   @@index([shopDomain, receivedAt])
+}
+
+// ───────────── Fase 3: recuperación de carritos ─────────────
+
+enum RecoveryEmailStatus {
+  SENT // enviado por Resend
+  DRY_RUN // sin RESEND_API_KEY: se registra pero no se envía (desarrollo)
+  SKIPPED // no se envía: la misma persona tiene un carrito más reciente
+  FAILED
+}
+
+model RecoveryEmail {
+  id         String              @id @default(cuid())
+  storeId    String
+  cartId     String              @unique
+  emailHash  String
+  status     RecoveryEmailStatus
+  providerId String?
+  error      String?
+  sentAt     DateTime            @default(now())
+  store      Store               @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  cart       Cart                @relation(fields: [cartId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, emailHash, sentAt])
+  @@index([storeId, status, sentAt])
+}
+
+// Personas que pidieron no recibir más correos de recuperación de una tienda.
+model Unsubscribe {
+  id        String   @id @default(cuid())
+  storeId   String
+  emailHash String
+  createdAt DateTime @default(now())
+  store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, emailHash])
 }
