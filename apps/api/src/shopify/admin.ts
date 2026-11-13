@@ -58,13 +58,21 @@ export async function createWebPixel(admin: ShopifyAdmin, pixelKey: string): Pro
     { webPixel: { settings } },
   );
   if (data.webPixelCreate.webPixel) return data.webPixelCreate.webPixel.id;
-  // Si ya existe un pixel (reinstalación), lo actualizamos con la clave nueva.
+  // Si ya existe un pixel (reinstalación o túnel nuevo), lo actualizamos con la clave y la URL actuales.
   if (data.webPixelCreate.userErrors.some((e) => e.code === "TAKEN")) {
-    const upd = await admin.graphql<{ webPixelUpdate: { webPixel: { id: string } | null } }>(
-      `mutation($webPixel: WebPixelInput!) { webPixelUpdate(webPixel: $webPixel) { webPixel { id } } }`,
-      { webPixel: { settings } },
+    const current = await admin.graphql<{ webPixel: { id: string } | null }>(`query { webPixel { id } }`);
+    const id = current.webPixel?.id;
+    if (!id) throw new Error("webPixelCreate dijo TAKEN pero no se encontró el pixel");
+    const upd = await admin.graphql<{
+      webPixelUpdate: { webPixel: { id: string } | null; userErrors: { message: string; code: string }[] };
+    }>(
+      `mutation($id: ID!, $webPixel: WebPixelInput!) {
+        webPixelUpdate(id: $id, webPixel: $webPixel) { webPixel { id } userErrors { message code } }
+      }`,
+      { id, webPixel: { settings } },
     );
-    return upd.webPixelUpdate.webPixel?.id ?? null;
+    if (upd.webPixelUpdate.userErrors.length) throw new Error(`webPixelUpdate: ${JSON.stringify(upd.webPixelUpdate.userErrors)}`);
+    return upd.webPixelUpdate.webPixel?.id ?? id;
   }
   throw new Error(`webPixelCreate: ${JSON.stringify(data.webPixelCreate.userErrors)}`);
 }

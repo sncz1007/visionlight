@@ -45,12 +45,24 @@ async function connectStore(cookie: string, orgId: string) {
 }
 
 // Simula las respuestas de Shopify.
+let pixelExists = false;
+const pixelUpdates: any[] = [];
 const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   if (url.endsWith("/admin/oauth/access_token")) return Response.json({ access_token: "shpat_secreto", scope: "read_orders" });
   const body = JSON.parse(String(init?.body ?? "{}"));
   if (body.query?.includes("shop {")) return Response.json({ data: { shop: { name: "Demo", currencyCode: "USD" } } });
   if (body.query?.includes("webhookSubscriptionCreate")) return Response.json({ data: { webhookSubscriptionCreate: { userErrors: [] } } });
-  if (body.query?.includes("webPixelCreate")) return Response.json({ data: { webPixelCreate: { webPixel: { id: "gid://shopify/WebPixel/1" }, userErrors: [] } } });
+  if (body.query?.includes("webPixelCreate")) {
+    if (pixelExists) return Response.json({ data: { webPixelCreate: { webPixel: null, userErrors: [{ code: "TAKEN", message: "taken" }] } } });
+    pixelExists = true;
+    return Response.json({ data: { webPixelCreate: { webPixel: { id: "gid://shopify/WebPixel/1" }, userErrors: [] } } });
+  }
+  if (body.query?.includes("webPixelUpdate")) {
+    if (!body.variables?.id) return Response.json({ errors: [{ message: "Variable $id of type ID! was not provided" }] });
+    pixelUpdates.push(body.variables);
+    return Response.json({ data: { webPixelUpdate: { webPixel: { id: body.variables.id }, userErrors: [] } } });
+  }
+  if (body.query?.includes("webPixel {")) return Response.json({ data: { webPixel: pixelExists ? { id: "gid://shopify/WebPixel/1" } : null } });
   return new Response("not found", { status: 404 });
 });
 
@@ -59,7 +71,7 @@ afterAll(async () => { await app.close(); await prisma.$disconnect(); vi.unstubA
 beforeEach(async () => {
   await prisma.$executeRawUnsafe('TRUNCATE "Event","Visitor","Cart","Order","Store","ShopifyOAuthState","WebhookReceipt","AuditLog","Session","Membership","User","Organization" CASCADE');
 });
-afterEach(() => fetchMock.mockClear());
+afterEach(() => { fetchMock.mockClear(); pixelExists = false; pixelUpdates.length = 0; });
 
 describe("utilidades OAuth", () => {
   it("normaliza dominios y rechaza los que no son de Shopify", () => {
@@ -88,6 +100,20 @@ describe("conexión de tienda", () => {
     const list = await app.inject({ method: "GET", url: `/orgs/${orgId}/stores`, headers: { cookie } });
     expect(list.json().stores[0]).toMatchObject({ shopDomain: SHOP, pixelActive: true });
     expect(JSON.stringify(list.json())).not.toContain("accessToken");
+  });
+
+  it("al reconectar actualiza el pixel existente y conserva su clave", async () => {
+    const { cookie, orgId } = await signup("a@a.com", "Empresa A");
+    await connectStore(cookie, orgId);
+    const before = await prisma.store.findUniqueOrThrow({ where: { shopDomain: SHOP } });
+    await connectStore(cookie, orgId);
+    const after = await prisma.store.findUniqueOrThrow({ where: { shopDomain: SHOP } });
+    expect(after.pixelKey).toBe(before.pixelKey);
+    expect(after.webPixelId).toBe("gid://shopify/WebPixel/1");
+    expect(pixelUpdates).toHaveLength(1);
+    expect(JSON.parse(pixelUpdates[0].webPixel.settings === undefined ? "{}" : JSON.stringify(pixelUpdates[0].webPixel.settings))).toMatchObject({
+      accountID: before.pixelKey, ingestUrl: "https://api.visionlight.test/ingest/pixel",
+    });
   });
 
   it("rechaza un callback con firma falsa", async () => {

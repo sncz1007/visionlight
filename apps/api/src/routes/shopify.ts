@@ -63,7 +63,9 @@ export async function shopifyRoutes(app: FastifyInstance) {
     const prior = await app.prisma.store.findUnique({ where: { shopDomain: q.shop } });
     if (prior && prior.organizationId !== state.organizationId && prior.status === "ACTIVE") return fail("taken");
 
-    const pixelKey = randomBytes(18).toString("base64url");
+    // Se conserva la clave del pixel al reconectar: así el pixel ya instalado sigue funcionando
+    // aunque falle su actualización.
+    const pixelKey = prior?.pixelKey ?? randomBytes(18).toString("base64url");
     const store = await app.prisma.store.upsert({
       where: { shopDomain: q.shop },
       create: {
